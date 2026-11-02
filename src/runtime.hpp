@@ -108,7 +108,7 @@ public:
                 if(!f.focused){f.status="Conectado / jogo sem foco";armed=false;}
                 else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if(s.skeleton||s.rage){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
                     f.stamp=began;
-                    if(armed&&s.rage&&fresh(f,Clock::now())&&(GetAsyncKeyState(s.key)&0x8000)){auto p=target(f,s);if(p){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=LONG(std::lround(std::clamp(p->x-r.right*.5f,-2000.f,2000.f)));input.mi.dy=LONG(std::lround(std::clamp(p->y-r.bottom*.5f,-2000.f,2000.f)));input.mi.dwFlags=MOUSEEVENTF_MOVE;sent+=SendInput(1,&input,sizeof(input));}}
+                    if(armed&&s.rage&&fresh(f,Clock::now())&&(GetAsyncKeyState(s.key)&0x8000)){auto p=target(f,s);if(p&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=LONG(std::lround(std::clamp(p->x-r.right*.5f,-2000.f,2000.f)));input.mi.dy=LONG(std::lround(std::clamp(p->y-r.bottom*.5f,-2000.f,2000.f)));input.mi.dwFlags=MOUSEEVENTF_MOVE;sent+=SendInput(1,&input,sizeof(input));}}
                 }
             }catch(const std::exception& e){f.error=e.what();f.status="Leitura indisponível";f.poses.clear();armed=false;memory.reset();}
             f.readMs=std::chrono::duration<float,std::milli>(Clock::now()-began).count();maxCycleMs.store(std::max(maxCycleMs.load(),double(f.readMs)));publish(std::move(f));
