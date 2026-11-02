@@ -1,0 +1,5 @@
+/build/
+/package/
+/deliver/
+*.pdb
+*.ilk

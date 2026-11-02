@@ -1,0 +1,42 @@
+name: SANGUE Windows
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test and capture native UI
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package, deliver | Out-Null
+          Copy-Item build/Release/SANGUE.exe package/SANGUE.exe
+          Copy-Item README.md package/LEIA-ME.md
+          Copy-Item package/SANGUE.exe deliver/SANGUE.exe
+          Compress-Archive package/* deliver/SANGUE-Windows-x64.zip
+          Get-ChildItem deliver -File | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content deliver/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SANGUE-Windows-x64
+          path: deliver/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SANGUE-visual-review
+          path: |
+            build/loading.png
+            build/panel-*.png
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: failure-logs
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/startup-error.txt
