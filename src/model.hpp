@@ -31,12 +31,24 @@ struct View {
 enum Bone{Head,Neck,Chest,Spine,Pelvis,UpperL,LowerL,HandL,UpperR,LowerR,HandR,ThighL,CalfL,FootL,ThighR,CalfR,FootR,Count};
 inline constexpr int links[][2]={{Head,Neck},{Neck,Chest},{Chest,Spine},{Spine,Pelvis},{Chest,UpperL},{UpperL,LowerL},{LowerL,HandL},{Chest,UpperR},{UpperR,LowerR},{LowerR,HandR},{Pelvis,ThighL},{ThighL,CalfL},{CalfL,FootL},{Pelvis,ThighR},{ThighR,CalfR},{CalfR,FootR}};
 struct Pose{uint64_t id{};std::array<std::optional<V3>,Count> points;};
-struct Frame{View view;std::vector<Pose> poses;Clock::time_point stamp{};uint64_t serial{};uint32_t pid{};int x{},y{};bool focused{};unsigned nodes{},rejected{},readErrors{};float readMs{};std::string status="Aguardando jogo",error,hash;};
+struct Frame{View view;std::vector<Pose> poses;Clock::time_point stamp{};uint64_t serial{},moduleBase{};uint32_t pid{};int x{},y{};bool focused{},budgetExpired{};unsigned nodes{},rejected{},readErrors{},namedBones{},ambiguousBones{};float readMs{};std::string status="Aguardando jogo",error,hash,aimState="Rage desligado",sampledNames;};
 struct Settings{bool rage{},skeleton{},unknownTargets{};float radius{180},thickness{1.5f};int bone{Head},key{2};};
 inline bool fresh(const Frame& f,Clock::time_point now){auto age=now-f.stamp;return f.stamp!=Clock::time_point{}&&age>=Clock::duration::zero()&&age<std::chrono::milliseconds(25);}
 inline std::vector<Pose> unique(std::vector<Pose> p){std::unordered_set<uint64_t> ids;p.erase(std::remove_if(p.begin(),p.end(),[&](const Pose& v){return !v.id||!ids.insert(v.id).second;}),p.end());return p;}
 inline std::optional<V2> target(const Frame& f,const Settings& s){
     if(!s.unknownTargets||s.bone<0||s.bone>=Count)return {};float best=s.radius*s.radius;std::optional<V2> answer;
     for(const auto& p:f.poses)if(p.points[s.bone]){auto q=f.view.project(*p.points[s.bone]);if(q){float dx=q->x-f.view.width*.5f,dy=q->y-f.view.height*.5f,d=dx*dx+dy*dy;if(d<best){best=d;answer=q;}}}return answer;
+}
+inline V3 rebase(V3 p,const View& from,const View& to){
+    p.x+=float(double(from.anchor[0])-to.anchor[0]);p.y+=float(double(from.anchor[1])-to.anchor[1]);p.z+=float(double(from.anchor[2])-to.anchor[2]);return p;
+}
+inline std::string aimState(const Frame& f,const Settings& s,bool held,Clock::time_point now){
+    if(!s.rage)return "Rage desligado";
+    if(!f.focused)return "Aguardando foco no jogo";
+    if(!fresh(f,now))return "Amostra ausente ou expirada";
+    if(!s.unknownTargets)return "Bloqueado: alvos sem equipe não autorizados";
+    if(!held)return "Segure a tecla de ativação configurada";
+    if(!target(f,s))return "Nenhum osso selecionado dentro do FOV";
+    return "Pronto para entrada";
 }
 }

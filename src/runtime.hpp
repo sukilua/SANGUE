@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <cstring>
 #include <cctype>
+#include <unordered_map>
 #include "model.hpp"
 namespace sangue {
 inline constexpr char ExpectedHash[]="ff080393961ac709090824356621358ae4f63dbe1c62ff636d528589cd097747";
@@ -34,6 +35,7 @@ class Memory{
     Handle handle;
 public:
     explicit Memory(DWORD pid):handle(OpenProcess(PROCESS_VM_READ|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid)){if(!handle.h)throw std::runtime_error("OpenProcess: "+std::to_string(GetLastError()));}
+    bool alive()const{DWORD code{};return GetExitCodeProcess(handle.h,&code)&&code==STILL_ACTIVE;}
     void bytes(uint64_t address,void* out,size_t n)const{SIZE_T count{};if(address<0x10000||address>0x7fffffffffffULL-n||!ReadProcessMemory(handle.h,reinterpret_cast<LPCVOID>(address),out,n,&count)||count!=n)throw std::runtime_error("ReadProcessMemory: "+std::to_string(GetLastError()));}
     template<class T>T read(uint64_t p)const{T v{};bytes(p,&v,sizeof(v));return v;}
     uint64_t ptr(uint64_t p)const{auto v=read<uint64_t>(p);if(v<0x10000||v>0x7fffffffffffULL)throw std::runtime_error("Ponteiro inválido");return v;}
@@ -50,11 +52,11 @@ inline View camera(const Memory& m,uint64_t base,int width,int height){
     auto engine=m.ptr(base+0x80d5980),game=m.ptr(engine+0x58),player=m.ptr(game+0x58),cam=m.ptr(player+0xd88);
     View v;v.position=m.read<V3>(cam+0x7c);v.axes=m.read<std::array<float,9>>(cam+0x41c);v.fov=m.read<float>(cam+0x454);v.width=width;v.height=height;v.anchor=anchor(m,cam);if(!v.valid())throw std::runtime_error("Câmera incompatível");return v;
 }
-inline std::vector<Pose> sample(const Memory& m,uint64_t base,Frame& frame){
-    auto deadline=Clock::now()+std::chrono::milliseconds(12);std::vector<Pose> result;
+inline std::vector<Pose> sample(const Memory& m,uint64_t base,Frame& frame,Clock::time_point deadline=Clock::now()+std::chrono::milliseconds(12)){
+    std::vector<Pose> result;std::unordered_map<uint64_t,int> names;
     auto manager=m.ptr(base+0x8b7cd90),head=m.ptr(manager+8),node=m.ptr(head);std::unordered_set<uint64_t> visited;
     while(node!=head){
-        if(Clock::now()>deadline)throw std::runtime_error("Prazo da pose excedido (12 ms)");
+        if(Clock::now()>deadline){frame.budgetExpired=true;break;}
         if(visited.size()>=4096||!visited.insert(node).second)throw std::runtime_error("Lista cíclica/inválida");++frame.nodes;
         auto next=m.ptr(node);
         try{
@@ -63,19 +65,26 @@ inline std::vector<Pose> sample(const Memory& m,uint64_t base,Frame& frame){
             if(last<first||(last-first)%0xa0||last-first>512*0xa0)throw std::runtime_error("Vetor de ossos inválido");
             auto transform=m.read<std::array<float,12>>(entity+0x58);for(float v:transform)if(!std::isfinite(v)||std::abs(v)>1e8)throw std::runtime_error("Transform inválido");
             auto origin=anchor(m,entity);std::vector<uint8_t> data(static_cast<size_t>(last-first));if(!data.empty())m.bytes(first,data.data(),data.size());
-            Pose actor;actor.id=entity;int recognized=0;
-            for(size_t at=0;at<data.size();at+=0xa0){
-                if(Clock::now()>deadline)throw std::runtime_error("Prazo de leitura excedido");uint64_t descriptor{};std::memcpy(&descriptor,data.data()+at+0x88,8);
-                std::array<char,96> name{};auto string=m.ptr(m.ptr(descriptor+0x58));m.bytes(string,name.data(),name.size());auto end=std::find(name.begin(),name.end(),'\0');if(end==name.end())continue;
-                int slot=semantic(std::string(name.begin(),end));if(slot<0)continue;std::array<float,12> bone{};std::memcpy(bone.data(),data.data()+at+0x30,48);
+            Pose actor;actor.id=entity;int recognized=0;std::array<bool,Count> ambiguous{};
+            for(size_t at=0;at<data.size();at+=0xa0)try{
+                if(Clock::now()>deadline){frame.budgetExpired=true;throw std::runtime_error("Prazo de leitura excedido");}uint64_t descriptor{};std::memcpy(&descriptor,data.data()+at+0x88,8);
+                int slot=-1;auto cached=names.find(descriptor);
+                if(cached!=names.end())slot=cached->second;
+                else{std::array<char,96> name{};auto string=m.ptr(m.ptr(descriptor+0x58));m.bytes(string,name.data(),name.size());auto end=std::find(name.begin(),name.end(),'\0');if(end==name.end())continue;
+                    std::string label(name.begin(),end);slot=semantic(label);names.emplace(descriptor,slot);if(frame.sampledNames.size()<200)frame.sampledNames+=label+" ";}
+                if(slot<0)continue;++frame.namedBones;
+                if(ambiguous[slot])continue;if(actor.points[slot]){actor.points[slot].reset();ambiguous[slot]=true;--recognized;++frame.ambiguousBones;continue;}
+                std::array<float,12> bone{};std::memcpy(bone.data(),data.data()+at+0x30,48);for(float v:bone)if(!std::isfinite(v))throw std::runtime_error("Matriz de osso não finita");
                 V3 local{bone[9],bone[10],bone[11]};if(!finite(local))throw std::runtime_error("Osso não finito");
                 V3 p{transform[0]*local.x+transform[3]*local.y+transform[6]*local.z+transform[9],transform[1]*local.x+transform[4]*local.y+transform[7]*local.z+transform[10],transform[2]*local.x+transform[5]*local.y+transform[8]*local.z+transform[11]};
                 p.x+=float(double(origin[0])-frame.view.anchor[0]);p.y+=float(double(origin[1])-frame.view.anchor[1]);p.z+=float(double(origin[2])-frame.view.anchor[2]);
                 if(!finite(p))throw std::runtime_error("Posição inválida");actor.points[slot]=p;++recognized;
-            }
+            }catch(const std::exception& e){++frame.readErrors;if(frame.error.empty())frame.error=std::string("Osso: ")+e.what();if(frame.budgetExpired)break;}
+            if(frame.budgetExpired){++frame.rejected;break;}
+            if(anchor(m,entity)!=origin||m.ptr(component+0xe8)!=skeleton||m.ptr(skeleton+0xd8)!=pose)throw std::runtime_error("Identidade/origem da pose mudou");
             if(m.read<uint64_t>(pose+0x10)!=first||m.read<uint64_t>(pose+0x18)!=last||m.ptr(component+0x40)!=entity)throw std::runtime_error("Pose mudou durante a leitura");
             if(recognized>=5)result.push_back(std::move(actor));else ++frame.rejected;
-        }catch(const std::exception& e){++frame.readErrors;if(frame.error.empty())frame.error=e.what();}
+        }catch(const std::exception& e){++frame.readErrors;++frame.rejected;if(frame.error.empty())frame.error=std::string("Entidade: ")+e.what();}
         node=next;
     }
     return unique(std::move(result));
@@ -83,15 +92,16 @@ inline std::vector<Pose> sample(const Memory& m,uint64_t base,Frame& frame){
 inline HWND gameWindow(DWORD pid){struct Search{DWORD pid;HWND found;};Search s{pid,nullptr};EnumWindows([](HWND w,LPARAM v)->BOOL{auto& s=*reinterpret_cast<Search*>(v);DWORD id{};GetWindowThreadProcessId(w,&id);if(id==s.pid&&IsWindowVisible(w)&&GetWindow(w,GW_OWNER)==nullptr){s.found=w;return FALSE;}return TRUE;},reinterpret_cast<LPARAM>(&s));return s.found;}
 inline DWORD findGame(){Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0));PROCESSENTRY32W e{sizeof(e)};if(Process32FirstW(snapshot.h,&e))do{if(!_wcsicmp(e.szExeFile,L"BloodStrike.exe"))return e.th32ProcessID;}while(Process32NextW(snapshot.h,&e));return 0;}
 class Runtime{
-    std::jthread thread;std::mutex mutex;Settings settings;std::shared_ptr<const Frame> published=std::make_shared<Frame>();
+    std::jthread thread;std::mutex mutex;Settings settings;std::shared_ptr<const Frame> published=std::make_shared<Frame>(),lastFocused;
     HWND notify{};std::atomic<bool> pending{};uint64_t serial{};
-    void publish(Frame f){f.serial=++serial;std::atomic_store(&published,std::make_shared<const Frame>(std::move(f)));if(notify&&!pending.exchange(true)&&!PostMessageW(notify,WM_APP+1,0,0))pending=false;}
+    void publish(Frame f){f.serial=++serial;if(f.focused)std::atomic_store(&lastFocused,std::make_shared<const Frame>(f));std::atomic_store(&published,std::make_shared<const Frame>(std::move(f)));if(notify&&!pending.exchange(true)&&!PostMessageW(notify,WM_APP+1,0,0))pending=false;}
 public:
-    std::atomic<bool> armed{};std::atomic<uint64_t> sent{};std::atomic<double> maxCycleMs{};
+    std::atomic<uint64_t> sent{};std::atomic<double> maxCycleMs{};
     ~Runtime(){stop();}
     Settings config(){std::scoped_lock lock(mutex);return settings;}
     void config(Settings s){std::scoped_lock lock(mutex);settings=s;}
     std::shared_ptr<const Frame> frame(){return std::atomic_load(&published);}
+    std::shared_ptr<const Frame> diagnosticFrame(){auto f=frame();auto prior=std::atomic_load(&lastFocused);return !f->focused&&prior&&prior->pid==f->pid?prior:f;}
     void acknowledge(){pending=false;}
     void stop(){if(thread.joinable()){thread.request_stop();thread.join();}}
     void start(HWND window){notify=window;thread=std::jthread([this](std::stop_token stop){
@@ -104,13 +114,15 @@ public:
                     Handle snap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid));MODULEENTRY32W module{sizeof(module)};if(!Module32FirstW(snap.h,&module))throw std::runtime_error("Módulo indisponível: "+std::to_string(GetLastError()));
                     base=reinterpret_cast<uint64_t>(module.modBaseAddr);hash=fingerprint(module.szExePath);f.hash=hash;if(hash!=ExpectedHash)throw std::runtime_error("SHA256 diferente do layout auditado; leitura bloqueada");memory=std::make_unique<Memory>(pid);
                 }
-                f.pid=pid;f.hash=hash;auto w=gameWindow(pid);if(!w)throw std::runtime_error("Janela do jogo indisponível");RECT r{};GetClientRect(w,&r);POINT origin{};ClientToScreen(w,&origin);f.x=origin.x;f.y=origin.y;f.focused=GetForegroundWindow()==w;
-                if(!f.focused){f.status="Conectado / jogo sem foco";armed=false;}
+                f.pid=pid;f.moduleBase=base;f.hash=hash;auto w=gameWindow(pid);if(!w)throw std::runtime_error("Janela do jogo indisponível");RECT r{};GetClientRect(w,&r);POINT origin{};ClientToScreen(w,&origin);f.x=origin.x;f.y=origin.y;f.focused=GetForegroundWindow()==w;
+                if(!f.focused){f.status="Conectado / jogo sem foco";f.aimState=aimState(f,s,false,Clock::now());}
                 else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if(s.skeleton||s.rage){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
                     f.stamp=began;
-                    if(armed&&s.rage&&fresh(f,Clock::now())&&(GetAsyncKeyState(s.key)&0x8000)){auto p=target(f,s);if(p&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=LONG(std::lround(std::clamp(p->x-r.right*.5f,-2000.f,2000.f)));input.mi.dy=LONG(std::lround(std::clamp(p->y-r.bottom*.5f,-2000.f,2000.f)));input.mi.dwFlags=MOUSEEVENTF_MOVE;sent+=SendInput(1,&input,sizeof(input));}}
+                    const bool held=(GetAsyncKeyState(s.key)&0x8000)!=0;f.aimState=aimState(f,s,held,Clock::now());
+                    if(f.aimState=="Pronto para entrada"){auto p=target(f,s);if(p&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=LONG(std::lround(std::clamp(p->x-r.right*.5f,-2000.f,2000.f)));input.mi.dy=LONG(std::lround(std::clamp(p->y-r.bottom*.5f,-2000.f,2000.f)));input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Entrada aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";}}
+
                 }
-            }catch(const std::exception& e){f.error=e.what();f.status="Leitura indisponível";f.poses.clear();armed=false;memory.reset();}
+            }catch(const std::exception& e){f.error=e.what();f.status="Leitura indisponível";f.poses.clear();f.aimState="Leitura indisponível: "+f.error;if(memory&&!memory->alive())memory.reset();}
             f.readMs=std::chrono::duration<float,std::milli>(Clock::now()-began).count();maxCycleMs.store(std::max(maxCycleMs.load(),double(f.readMs)));publish(std::move(f));
             if(timer.h){LARGE_INTEGER due{};due.QuadPart=-10000;SetWaitableTimer(timer.h,&due,0,nullptr,nullptr,FALSE);WaitForSingleObject(timer.h,30);}else std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

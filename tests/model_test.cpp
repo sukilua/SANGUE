@@ -11,5 +11,14 @@ int main(){
     Pose a;a.id=9;a.points[Head]=V3{0,0,-10};Pose b=a;b.id=10;
     require(unique({a,a,b,Pose{}}).size()==2,"deduplicate stable ids");
     f.view=v;f.poses={a};Settings s;require(!target(f,s),"unknown target blocked by default");s.unknownTargets=true;require(target(f,s).has_value(),"explicit unknown target selection");
-    s.bone=Count;require(!target(f,s),"invalid bone rejected");std::cout<<checks<<" checks passed\n";
+    View moved=v;moved.anchor={1000000000,-1000000000,0};View next=moved;next.anchor[0]-=100;
+    require(std::abs(rebase({1,2,3},moved,next).x-101)<.001f,"camera origin rebasing preserves position");
+    s.bone=Count;require(!target(f,s),"invalid bone rejected");
+    s.bone=Head;s.rage=true;f.focused=true;
+    require(aimState(f,s,true,f.stamp)=="Pronto para entrada","module and held key suffice without arm latch");
+    require(aimState(f,s,false,f.stamp)=="Segure a tecla de ativação configurada","key release pauses movement");
+    f.focused=false;require(aimState(f,s,true,f.stamp)=="Aguardando foco no jogo","focus loss pauses movement");f.focused=true;
+    require(aimState(f,s,true,f.stamp+std::chrono::milliseconds(25))=="Amostra ausente ou expirada","stale frame cannot move mouse");
+    s.unknownTargets=false;require(aimState(f,s,true,f.stamp)=="Bloqueado: alvos sem equipe não autorizados","unknown target rejection explained");
+    s.unknownTargets=true;s.rage=false;require(aimState(f,s,true,f.stamp)=="Rage desligado","module off pauses movement");std::cout<<checks<<" checks passed\n";
 }
