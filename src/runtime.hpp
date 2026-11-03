@@ -118,7 +118,7 @@ public:
                 }
                 f.pid=pid;f.moduleBase=base;f.hash=hash;auto w=gameWindow(pid);if(!w)throw std::runtime_error("Janela do jogo indisponível");RECT r{};GetClientRect(w,&r);POINT origin{};ClientToScreen(w,&origin);f.x=origin.x;f.y=origin.y;f.focused=GetForegroundWindow()==w;
                 if(!f.focused){f.status="Conectado / jogo sem foco";f.aimState=aimState(f,s,false,Clock::now());}
-                else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if((s.skeleton||s.rage)&&!calibration.busy()){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
+                else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if(s.rage&&!calibration.busy()){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
                     f.stamp=began;
                     const bool held=(GetAsyncKeyState(s.key)&0x8000)!=0;f.aimState=aimState(f,s,held,Clock::now());
                     if(!calibration.busy()&&f.aimState=="Pronto para entrada"){

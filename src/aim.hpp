@@ -7,9 +7,9 @@ inline float degrees(float angle){return std::remainder(angle,360.f);}
 inline bool validSensitivity(float value){return std::isfinite(value)&&std::abs(value)>=.0001f&&std::abs(value)<=2.f;}
 struct MouseStep{int x{},y{};uint64_t target{};};
 class Stabilizer{
-    uint64_t locked{};Clock::time_point sent{};std::array<float,9> lastAxes{};float carryX{},carryY{};bool centered{};int lastBone{-1};float lastX{},lastY{};
+    uint64_t locked{};bool observed{};float lastErrorX{},lastErrorY{};std::array<float,9> lastAxes{};float carryX{},carryY{};bool centered{};int lastBone{-1};float lastX{},lastY{};
 public:
-    void reset(){locked=0;sent={};carryX=carryY=0;centered=false;lastBone=-1;}
+    void reset(){locked=0;observed=false;carryX=carryY=0;centered=false;lastBone=-1;}
     MouseStep update(const Frame& f,const Settings& s,Clock::time_point now){
         if(!s.rage||!s.unknownTargets||!f.focused||!s.calibrated||!validSensitivity(s.degreesX)||!validSensitivity(s.degreesY)||!fresh(f,now)||!f.view.valid()){reset();return {};}
         if(lastBone!=s.bone||lastX!=s.degreesX||lastY!=s.degreesY){reset();lastBone=s.bone;lastX=s.degreesX;lastY=s.degreesY;}
@@ -18,21 +18,18 @@ public:
         for(const auto& pose:f.poses)if(s.bone>=0&&s.bone<Count&&pose.points[s.bone]){auto p=f.view.project(*pose.points[s.bone]);if(!p)continue;float x=p->x-f.view.width*.5f,y=p->y-f.view.height*.5f,d=x*x+y*y;
             if(pose.id==locked&&d<=radius*radius){point=p;next=pose.id;break;}if(d<best){best=d;point=p;next=pose.id;}}
         if(!point){reset();return {};}
-        if(locked!=next){locked=next;carryX=carryY=0;centered=false;sent={};}
+        if(locked!=next){locked=next;carryX=carryY=0;centered=false;observed=false;}
         MouseStep result{0,0,locked};
         const float x=std::atan((point->x-f.view.width*.5f)/focal)*57.2957795f,y=-std::atan((point->y-f.view.height*.5f)/focal)*57.2957795f;
         const float zoneX=std::max(.025f,std::abs(s.degreesX)*.55f),zoneY=std::max(.025f,std::abs(s.degreesY)*.55f);
         if(std::abs(x)<=zoneX*(centered?1.8f:1.f)&&std::abs(y)<=zoneY*(centered?1.8f:1.f)){centered=true;carryX=carryY=0;return result;}centered=false;
-        if(sent!=Clock::time_point{}){
-            auto elapsed=std::chrono::duration<float>(now-sent).count();if(elapsed<.008f)return result;
-            float change=0;for(size_t i=0;i<9;++i)change+=std::abs(f.view.axes[i]-lastAxes[i]);if(change<.00001f&&elapsed<.03f)return result;
-        }
-        float seconds=sent==Clock::time_point{}?.008f:std::clamp(std::chrono::duration<float>(now-sent).count(),.008f,.03f);
-        float fraction=1-std::exp(-seconds/.035f);
+        if(observed){float change=0;for(size_t i=0;i<9;++i)change+=std::abs(f.view.axes[i]-lastAxes[i]);
+            if(change<.00001f&&std::abs(x-lastErrorX)<.02f&&std::abs(y-lastErrorY)<.02f)return result;}
+        constexpr float fraction=.7f;
         auto axis=[&](float angle,float gain,float zone,float& carry){if(std::abs(angle)<=zone){carry=0;return 0;}float error=angle/gain;if(carry*error<0)carry=0;
-            float requested=std::clamp(angle*fraction,-1.f,1.f)/gain+carry;int step=int(std::round(requested));const int limit=int(std::floor(std::abs(error)));step=std::clamp(step,-limit,limit);carry=requested-step;return std::clamp(step,-2000,2000);};
+            float requested=std::clamp(angle*fraction,-3.f,3.f)/gain+carry;int step=int(std::round(requested));const int limit=int(std::floor(std::abs(error)));step=std::clamp(step,-limit,limit);carry=requested-step;return std::clamp(step,-2000,2000);};
         result.x=axis(x,s.degreesX,zoneX,carryX);result.y=axis(y,s.degreesY,zoneY,carryY);
-        if(result.x||result.y){sent=now;lastAxes=f.view.axes;}return result;
+        if(result.x||result.y){observed=true;lastAxes=f.view.axes;lastErrorX=x;lastErrorY=y;}return result;
     }
 };
 struct CalibrationTick{MouseStep move;bool save{},busy{};float x{},y{},fov{};std::string message;};

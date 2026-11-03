@@ -14,6 +14,7 @@ int main(){unsigned n=0;auto check=[&](bool ok,const char* message){++n;if(!ok){
     Settings reverse=s;reverse.degreesX=-.1f;Stabilizer inverted;check(inverted.update(f,reverse,now).x==-baseline.x,"inverted sensitivity preserved");
     check(first.update(f,s,now+std::chrono::milliseconds(2)).x==0,"do not repeat movement every worker tick");
     check(first.update(f,s,now+std::chrono::milliseconds(9)).x==0,"wait for observable camera response");
+    f.stamp=now+std::chrono::milliseconds(1);f.view=oriented(1.f);check(first.update(f,s,f.stamp).x>0,"new camera response is processed without fixed 8ms pause");f.stamp=now;f.view=oriented();
     Pose b=a;b.id=2;b.points[Head]=V3{1.01f,0,-10};f.poses={a,b};Stabilizer lock;check(lock.update(f,s,now).target==1,"closest first target");
     f.poses[0].points[Head]=V3{1.01f,0,-10};f.poses[1].points[Head]=V3{1,0,-10};check(lock.update(f,s,now+std::chrono::milliseconds(9)).target==1,"retain target despite small ranking noise");
     f.poses={a};Stabilizer closed;float angle=0;
