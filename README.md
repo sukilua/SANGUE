@@ -39,3 +39,15 @@ Nomes de ossos são resolvidos uma vez por descriptor em cada amostra, sem cache
 Falhas transitórias de layout não refazem o hash do executável a cada erro. O diagnóstico preserva a última amostra em foco do mesmo PID, identifica sua origem e sua idade e distingue o estado atual. Isso não confirma que offsets, alinhamento ou sensibilidade da mira estão corretos em jogo.
 
 Bypass e ofuscação não foram implementados.
+
+## 1.2.0 — estabilização e calibração
+
+O controlador deixa de repetir a diferença inteira em pixels a cada leitura. Usa correção angular, alvo retido até sair do FOV, passos graduais, zona de parada com histerese e espera por resposta observável da câmera. Há intervalo mínimo de 8 ms entre envios, espera de até 30 ms por mudança observável da câmera e suavização temporal de 35 ms. O objetivo é reduzir oscilação, não manter a promessa de reação completa de 1 ms. O ganho do mouse é medido nos eixos X/Y; não é deduzido do número de sensibilidade mostrado no menu do jogo. Isso melhora caminhos conhecidos de oscilação, mas não garante ausência de tremor em partida.
+
+**Primeiro uso desta versão:** no campo de treino, abra Ajustes → Calibrar sensibilidade X e Y; volte ao jogo em três segundos e não mova o mouse. A rotina envia pequenos movimentos horizontais e verticais (16 counts por eixo), tenta desfazê-los e calcula a rotação observada. Se perder foco ou não confirmar movimento, cancela. Clique Salvar após concluir. Não é necessário F6.
+
+Use o mesmo DPI, sensibilidade e zoom/ADS que pretende usar na mira; mantenha o botão de zoom pressionado durante a calibração quando necessário. Recalibre após alterar esses valores. Mudança de FOV superior a dois graus bloqueia o controlador até usar o zoom calibrado ou recalibrar. Sensibilidade não linear, aceleração, assistência do próprio jogo, leitura de câmera incompatível e entradas recusadas podem impedir uma medição válida; não há compatibilidade automática universal comprovada.
+
+FOV de seleção usa pixels normalizados para altura 1080. A correção usa FOV e dimensões reais da janela do jogo. Testes sintéticos com sete proporções/tamanhos verificam invariância angular, ganhos, inversão, retenção de alvo, parada sem alternância de direção e calibração. Esses testes não substituem medir o jogo.
+
+Interface: nova aba Ajustes, cartões arredondados, modo compacto, tamanho inicial limitado à área útil do monitor e carregamento por estágios de recurso, preferências e início do leitor. A animação permanece brevemente após a inicialização para transição visual; não mostra progresso inventado de conexão ao jogo. Capturas e limites dos controles são verificados em 640×480, 800×600, 1280×720, 1920×1080, 2560×1440, 3840×2160 e 1080×1920.

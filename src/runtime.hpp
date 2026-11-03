@@ -17,6 +17,7 @@
 #include <cctype>
 #include <unordered_map>
 #include "model.hpp"
+#include "aim.hpp"
 namespace sangue {
 inline constexpr char ExpectedHash[]="ff080393961ac709090824356621358ae4f63dbe1c62ff636d528589cd097747";
 inline std::wstring wide(const std::string& s){if(s.empty())return {};int n=MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),nullptr,0);std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,0,s.data(),int(s.size()),w.data(),n);return w;}
@@ -93,7 +94,7 @@ inline HWND gameWindow(DWORD pid){struct Search{DWORD pid;HWND found;};Search s{
 inline DWORD findGame(){Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0));PROCESSENTRY32W e{sizeof(e)};if(Process32FirstW(snapshot.h,&e))do{if(!_wcsicmp(e.szExeFile,L"BloodStrike.exe"))return e.th32ProcessID;}while(Process32NextW(snapshot.h,&e));return 0;}
 class Runtime{
     std::jthread thread;std::mutex mutex;Settings settings;std::shared_ptr<const Frame> published=std::make_shared<Frame>(),lastFocused;
-    HWND notify{};std::atomic<bool> pending{};uint64_t serial{};
+    HWND notify{};std::atomic<bool> pending{},calibrateRequested{};uint64_t serial{};
     void publish(Frame f){f.serial=++serial;if(f.focused)std::atomic_store(&lastFocused,std::make_shared<const Frame>(f));std::atomic_store(&published,std::make_shared<const Frame>(std::move(f)));if(notify&&!pending.exchange(true)&&!PostMessageW(notify,WM_APP+1,0,0))pending=false;}
 public:
     std::atomic<uint64_t> sent{};std::atomic<double> maxCycleMs{};
@@ -102,13 +103,14 @@ public:
     void config(Settings s){std::scoped_lock lock(mutex);settings=s;}
     std::shared_ptr<const Frame> frame(){return std::atomic_load(&published);}
     std::shared_ptr<const Frame> diagnosticFrame(){auto f=frame();auto prior=std::atomic_load(&lastFocused);return !f->focused&&prior&&prior->pid==f->pid?prior:f;}
+    void requestCalibration(){std::scoped_lock lock(mutex);settings.calibrated=false;calibrateRequested=true;}
     void acknowledge(){pending=false;}
     void stop(){if(thread.joinable()){thread.request_stop();thread.join();}}
     void start(HWND window){notify=window;thread=std::jthread([this](std::stop_token stop){
-        DWORD pid=0;uint64_t base=0;std::unique_ptr<Memory> memory;std::string hash;Clock::time_point retry{};
+        DWORD pid=0;uint64_t base=0;std::unique_ptr<Memory> memory;std::string hash;Clock::time_point retry{};Stabilizer stabilizer;Calibration calibration;std::string calibrationStatus="Sensibilidade não calibrada";
         Handle timer(CreateWaitableTimerExW(nullptr,nullptr,0x2,TIMER_ALL_ACCESS));if(!timer.h)timer.h=CreateWaitableTimerW(nullptr,FALSE,nullptr);
         while(!stop.stop_requested()){
-            const auto began=Clock::now();Frame f;Settings s=config();
+            const auto began=Clock::now();Frame f;Settings s=config();if(calibrateRequested.exchange(false)){calibration.start(began);stabilizer.reset();calibrationStatus="Calibração: volte ao jogo em 3 segundos";}
             try{
                 if(!memory){if(began<retry){std::this_thread::sleep_for(std::chrono::milliseconds(10));continue;}retry=began+std::chrono::seconds(2);pid=findGame();if(!pid)throw std::runtime_error("Abra o Blood Strike pela Steam");
                     Handle snap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid));MODULEENTRY32W module{sizeof(module)};if(!Module32FirstW(snap.h,&module))throw std::runtime_error("Módulo indisponível: "+std::to_string(GetLastError()));
@@ -116,14 +118,25 @@ public:
                 }
                 f.pid=pid;f.moduleBase=base;f.hash=hash;auto w=gameWindow(pid);if(!w)throw std::runtime_error("Janela do jogo indisponível");RECT r{};GetClientRect(w,&r);POINT origin{};ClientToScreen(w,&origin);f.x=origin.x;f.y=origin.y;f.focused=GetForegroundWindow()==w;
                 if(!f.focused){f.status="Conectado / jogo sem foco";f.aimState=aimState(f,s,false,Clock::now());}
-                else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if(s.skeleton||s.rage){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
+                else{f.status="Leitura experimental";f.view=camera(*memory,base,r.right,r.bottom);if((s.skeleton||s.rage)&&!calibration.busy()){f.poses=sample(*memory,base,f);auto end=camera(*memory,base,r.right,r.bottom);if(end.anchor!=f.view.anchor)throw std::runtime_error("Origem da câmera mudou");f.view=end;}
                     f.stamp=began;
                     const bool held=(GetAsyncKeyState(s.key)&0x8000)!=0;f.aimState=aimState(f,s,held,Clock::now());
-                    if(f.aimState=="Pronto para entrada"){auto p=target(f,s);if(p&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=LONG(std::lround(std::clamp(p->x-r.right*.5f,-2000.f,2000.f)));input.mi.dy=LONG(std::lround(std::clamp(p->y-r.bottom*.5f,-2000.f,2000.f)));input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Entrada aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";}}
-
+                    if(!calibration.busy()&&f.aimState=="Pronto para entrada"){
+                        auto step=stabilizer.update(f,s,Clock::now());
+                        if((step.x||step.y)&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=step.x;input.mi.dy=step.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Correção estabilizada aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";}
+                        else f.aimState="Alvo estabilizado / aguardando câmera";
+                    }else stabilizer.reset();
                 }
-            }catch(const std::exception& e){f.error=e.what();f.status="Leitura indisponível";f.poses.clear();f.aimState="Leitura indisponível: "+f.error;if(memory&&!memory->alive())memory.reset();}
-            f.readMs=std::chrono::duration<float,std::milli>(Clock::now()-began).count();maxCycleMs.store(std::max(maxCycleMs.load(),double(f.readMs)));publish(std::move(f));
+                if(!f.focused)stabilizer.reset();
+                if(calibration.busy()){
+                    auto c=calibration.tick(f.view,f.focused,Clock::now());calibrationStatus=c.message;
+                    if((c.move.x||c.move.y)&&GetForegroundWindow()==w){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=c.move.x;input.mi.dy=c.move.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;if(!SendInput(1,&input,sizeof(input))){calibration.cancel();calibrationStatus="Calibração falhou: Windows recusou a entrada";}}
+                    if(c.save){std::scoped_lock lock(mutex);settings.degreesX=c.x;settings.degreesY=c.y;settings.calibrationFov=c.fov;settings.calibrated=true;}
+                    f.aimState="Calibração em andamento";
+                }
+
+            }catch(const std::exception& e){f.error=e.what();f.status="Leitura indisponível";f.poses.clear();stabilizer.reset();if(calibration.busy()){calibration.cancel();calibrationStatus="Calibração cancelada: "+f.error;}f.aimState="Leitura indisponível: "+f.error;if(memory&&!memory->alive())memory.reset();}
+            f.calibrationState=calibrationStatus;f.readMs=std::chrono::duration<float,std::milli>(Clock::now()-began).count();maxCycleMs.store(std::max(maxCycleMs.load(),double(f.readMs)));publish(std::move(f));
             if(timer.h){LARGE_INTEGER due{};due.QuadPart=-10000;SetWaitableTimer(timer.h,&due,0,nullptr,nullptr,FALSE);WaitForSingleObject(timer.h,30);}else std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });}
