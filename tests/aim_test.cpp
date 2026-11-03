@@ -15,6 +15,9 @@ int main(){unsigned n=0;auto check=[&](bool ok,const char* message){++n;if(!ok){
     check(first.update(f,s,now+std::chrono::milliseconds(2)).x==0,"do not repeat movement every worker tick");
     check(first.update(f,s,now+std::chrono::milliseconds(9)).x==0,"wait for observable camera response");
     f.stamp=now+std::chrono::milliseconds(1);f.view=oriented(1.f);check(first.update(f,s,f.stamp).x>0,"new camera response is processed without fixed 8ms pause");f.stamp=now;f.view=oriented();
+    Stabilizer retry;auto initial=retry.update(f,s,now);retry.rejected();check(retry.update(f,s,now+std::chrono::milliseconds(1)).x==initial.x,"Windows rejection does not latch the controller permanently");
+    Stabilizer waiting;waiting.update(f,s,now);Frame later=f;later.stamp=now+std::chrono::milliseconds(41);auto recover=waiting.update(later,s,later.stamp);check(recover.x>0&&recover.x<initial.x,"unchanged camera receives one smaller recovery attempt");
+    later.stamp=now+std::chrono::milliseconds(90);check(waiting.update(later,s,later.stamp).x==0&&waiting.status()=="Sem resposta da câmera: exporte o diagnóstico","missing camera feedback stops blind retries with diagnosis");
     Pose b=a;b.id=2;b.points[Head]=V3{1.01f,0,-10};f.poses={a,b};Stabilizer lock;check(lock.update(f,s,now).target==1,"closest first target");
     f.poses[0].points[Head]=V3{1.01f,0,-10};f.poses[1].points[Head]=V3{1,0,-10};check(lock.update(f,s,now+std::chrono::milliseconds(9)).target==1,"retain target despite small ranking noise");
     f.poses={a};Stabilizer closed;float angle=0;

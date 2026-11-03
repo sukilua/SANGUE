@@ -107,7 +107,7 @@ public:
     void acknowledge(){pending=false;}
     void stop(){if(thread.joinable()){thread.request_stop();thread.join();}}
     void start(HWND window){notify=window;thread=std::jthread([this](std::stop_token stop){
-        DWORD pid=0;uint64_t base=0;std::unique_ptr<Memory> memory;std::string hash;Clock::time_point retry{};Stabilizer stabilizer;Calibration calibration;std::string calibrationStatus="Sensibilidade não calibrada";
+        DWORD pid=0;uint64_t base=0;std::unique_ptr<Memory> memory;std::string hash;Clock::time_point retry{};Stabilizer stabilizer;Calibration calibration;std::string calibrationStatus=config().calibrated?"Calibração carregada das preferências":"Sensibilidade não calibrada";
         Handle timer(CreateWaitableTimerExW(nullptr,nullptr,0x2,TIMER_ALL_ACCESS));if(!timer.h)timer.h=CreateWaitableTimerW(nullptr,FALSE,nullptr);
         while(!stop.stop_requested()){
             const auto began=Clock::now();Frame f;Settings s=config();if(calibrateRequested.exchange(false)){calibration.start(began);stabilizer.reset();calibrationStatus="Calibração: volte ao jogo em 3 segundos";}
@@ -123,8 +123,8 @@ public:
                     const bool held=(GetAsyncKeyState(s.key)&0x8000)!=0;f.aimState=aimState(f,s,held,Clock::now());
                     if(!calibration.busy()&&f.aimState=="Pronto para entrada"){
                         auto step=stabilizer.update(f,s,Clock::now());
-                        if((step.x||step.y)&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=step.x;input.mi.dy=step.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Correção estabilizada aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";}
-                        else f.aimState="Alvo estabilizado / aguardando câmera";
+                        if((step.x||step.y)&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=step.x;input.mi.dy=step.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Correção aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";if(!accepted)stabilizer.rejected();}
+                        else f.aimState=stabilizer.status().empty()?"Nenhuma correção calculada":stabilizer.status();
                     }else stabilizer.reset();
                 }
                 if(!f.focused)stabilizer.reset();

@@ -1,4 +1,4 @@
-# SANGUE — by suki / 1.3.0
+# SANGUE — by suki / 1.4.0
 
 Aplicativo C++20 para Windows x64, somente com mira Rage. Banner, ícone, carregamento e calibração incorporados. Sem dependência de Python ou .NET.
 
@@ -36,3 +36,13 @@ cmake -S . -B build -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+## Correções 1.4.0
+
+A espera por feedback da câmera na 1.3.0 podia permanecer ativa sem limite. Agora há uma única tentativa menor de recuperação após 40 ms sem mudança observável; persistindo a ausência de resposta, o painel pede diagnóstico, sem repetir movimentos às cegas. Uma entrada recusada pelo Windows libera a próxima tentativa do controlador. Isso corrige caminhos do código, mas não comprova a causa da falha observada pelo usuário em partida.
+
+Calibração concluída é salva automaticamente; a opção escolhida para alvos sem equipe também é preservada. Rage continua desligado ao iniciar. O painel exibe o último estado da mira no mesmo processo mesmo após voltar à interface e distingue calibração ausente, permissão, leitura e retorno da câmera.
+
+Interface com estado do controle em destaque e abas Rage, Conexão e Calibração. Carregamento com lista de etapas reais, transição visual mais curta (mínimo de 360 ms), tratamento de falha e botão Tentar novamente. Um teste Windows simula falha de recurso, captura a tela de erro e aciona a recuperação, antes de verificar as telas nas sete resoluções.
+
+Se continuar sem atuar, exporte um novo diagnostico-SANGUE.txt depois da tentativa no campo de treino. O relatório da versão atual é necessário para distinguir ausência de entidades, bloqueio de calibração/FOV, entrada recusada e câmera sem feedback.

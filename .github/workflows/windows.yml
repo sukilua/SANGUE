@@ -33,6 +33,8 @@ jobs:
           path: |
             build/loading.png
             build/panel-*.png
+            build/recovery/loading.png
+            build/recovery/panel-0.png
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
