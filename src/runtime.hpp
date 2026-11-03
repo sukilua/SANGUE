@@ -122,8 +122,8 @@ public:
                     f.stamp=began;
                     const bool held=(GetAsyncKeyState(s.key)&0x8000)!=0;f.aimState=aimState(f,s,held,Clock::now());
                     if(!calibration.busy()&&f.aimState=="Pronto para entrada"){
-                        auto step=stabilizer.update(f,s,Clock::now());
-                        if((step.x||step.y)&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=step.x;input.mi.dy=step.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Correção aceita pelo Windows":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";if(!accepted)stabilizer.rejected();}
+                        auto step=stabilizer.update(f,s,Clock::now());f.targetId=step.target;
+                        if((step.x||step.y)&&GetForegroundWindow()==w&&!stop.stop_requested()){INPUT input{};input.type=INPUT_MOUSE;input.mi.dx=step.x;input.mi.dy=step.y;input.mi.dwFlags=MOUSEEVENTF_MOVE;SetLastError(0);auto accepted=SendInput(1,&input,sizeof(input));sent+=accepted;f.aimState=accepted?"Acompanhamento contínuo / entrada aceita":"Windows não aceitou a entrada ("+std::to_string(GetLastError())+")";if(!accepted)stabilizer.rejected();}
                         else f.aimState=stabilizer.status().empty()?"Nenhuma correção calculada":stabilizer.status();
                     }else stabilizer.reset();
                 }

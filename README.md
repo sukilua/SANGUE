@@ -1,33 +1,35 @@
-# SANGUE — by suki / 1.4.0
+# SANGUE — by suki / 1.5.0
 
-Aplicativo C++20 para Windows x64, somente com mira Rage. Banner, ícone, carregamento e calibração incorporados. Sem dependência de Python ou .NET.
+Projeto C++20 para Windows x64, somente com mira Rage. Sem ESP, modo Normal ou dependência de F6. Banner, ícone, carregamento, diagnóstico e calibração incorporados.
 
-## Mudanças desta versão
+## Acompanhamento contínuo
 
-- Removidos o ESP, a aba Skeleton, os controles visuais, a janela de overlay, o desenho de ossos e as configurações desse módulo.
-- Não há pausa fixa de 8 ms ou suavização temporal de 35 ms no controlador. Cada observação nova pode gerar correção imediatamente, com os dados já disponíveis. Observações repetidas sem resposta da câmera ou movimento relevante do alvo não repetem a mesma entrada.
-- Mantidos o alvo retido, a calibração X/Y, a correção angular e a zona de parada para reduzir oscilação.
-- O leitor de ossos permanece apenas como fonte interna de posições da mira; não há ESP de fundo nem overlay oculto.
+Com Rage ligado, o jogo em foco e a tecla configurada pressionada, o controlador avalia cada nova amostra e continua corrigindo o mesmo alvo. A trava de espera por resposta da câmera e o limite de duas tentativas da versão anterior foram removidos.
 
-**Latência física de zero segundos não existe e não foi medida em partida.** A leitura, o processamento, o agendamento do Windows, a entrada e os frames do jogo somam latência. O leitor continua com espera de aproximadamente 1 ms entre ciclos para não ocupar a CPU em loop contínuo. Isso não garante tempo total de reação de 1 ms.
+Quando o alvo chega ao centro, o mouse deixa de receber correções desnecessárias, mas o acompanhamento permanece ativo. Se o alvo se mover, mudar de direção ou reaparecer no FOV, as correções retomam automaticamente. Soltar a tecla, desligar Rage, perder foco ou ter dados expirados pausa o controle.
+
+A correção após a aquisição é proporcional ao tempo entre amostras e mantém zona de parada, resíduos fracionários e limite de deslocamento. Isso reduz envio duplicado do mesmo snapshot e movimentos excessivos, sem parar permanentemente após a primeira correção. Sensibilidade, resolução e FOV continuam considerados. Isso não prova ausência de oscilação em partida.
 
 ## Usar
 
-Baixe SANGUE.exe ou extraia o ZIP. Todos os módulos iniciam desligados. INSERT mostra/oculta o painel e END encerra. Não é necessário F6.
+1. Abra SANGUE.exe. O módulo Rage inicia desligado.
+2. No campo de treino, abra Calibração e clique Calibrar sensibilidade X e Y. Volte ao jogo em três segundos, com o mesmo zoom/DPI usado pela mira. Não mova o mouse até concluir. A rotina envia e tenta desfazer movimentos de 16 counts por eixo. A calibração é salva automaticamente.
+3. Ative Rage contínuo e permita explicitamente Alvos sem equipe. Segure Mouse 2 (ou a tecla configurada) para acompanhar o alvo.
+4. INSERT mostra/oculta o painel; END encerra.
 
-No campo de treino, abra Ajustes → Calibrar sensibilidade X e Y; volte ao jogo em três segundos. Use o mesmo zoom, DPI e sensibilidade da mira. Não mova o mouse até terminar. A rotina envia e tenta desfazer pequenos movimentos de 16 counts por eixo. Perder foco ou falhar na leitura cancela a calibração. Salve as preferências depois.
+Alvos sem equipe podem incluir aliados ou o próprio jogador: equipe, vida, visibilidade e jogador local não possuem filtro confirmado. Alterar DPI, sensibilidade ou zoom exige recalibrar. Diferença de FOV maior que dois graus em relação à calibração bloqueia a mira e informa o motivo.
 
-Ative Rage e permita explicitamente Alvos sem equipe; segure a tecla configurada (padrão Mouse 2) com o jogo em foco. Filtros de aliados, vida, visibilidade e jogador local não foram confirmados. Alvos sem equipe podem incluir aliados ou o próprio jogador. Alterar DPI, sensibilidade ou zoom exige recalibrar. A correção é bloqueada quando o FOV difere mais de dois graus da calibração.
+Preferências e diagnóstico ficam em `%LOCALAPPDATA%/SANGUE`. O painel destaca o estado do controle e preserva a última amostra em foco do mesmo PID. Se não houver atuação, exporte um diagnóstico desta versão após tentar no treino.
 
-Preferências e diagnóstico: `%LOCALAPPDATA%/SANGUE`. O relatório mantém a última amostra em foco do mesmo PID e identifica sua origem e idade.
+## Validação e limites
 
-## Limites e validação
+Testes sintéticos incluem acompanhamento prolongado, retorno após alinhamento ao centro, inversão de direção de alvo móvel, perda e recuperação de alvo, calibração, inversão de sensibilidade e sete resoluções. Testes Windows verificam leitura do próprio processo, casos de dados de ossos parciais, inicialização, recuperação de falha e telas do painel.
 
-Leitor experimental limitado ao SHA256 `ff080393961ac709090824356621358ae4f63dbe1c62ff636d528589cd097747`. A leitura usa offsets da auditoria estática existente; a semântica da cadeia de câmera e a classificação das entidades ainda precisam de confirmação em execução.
+**Ainda não validado dentro do Blood Strike.** Nenhum teste automatizado prova atuação correta no jogo. Entradas aceitas pelo Windows podem ser ignoradas pelo jogo. A cadeia de câmera e a classificação das entidades ainda precisam de confirmação em execução.
 
-Não validado dentro do Blood Strike. Não há bypass, ofuscação, driver, injeção ou garantia antiban. Sensibilidade não linear, aceleração, suavização do jogo e entradas recusadas podem impedir calibração ou atuação corretas. Uma entrada aceita pelo Windows não prova que o jogo a aplicou.
+O leitor só aceita o SHA256 `ff080393961ac709090824356621358ae4f63dbe1c62ff636d528589cd097747`. Os ossos são lidos apenas como posições internas da mira; não há desenho nem janela de overlay.
 
-Testes automatizados verificam projeção, deduplicação, dados parciais de ossos, idade de amostras, calibração, inversão, estabilidade e sete resoluções (640×480 a 4K, além de retrato). As capturas do painel verificam layout e limites dos controles. Nenhum desses testes prova funcionamento em partida.
+Sem bypass, ofuscação, driver, injeção ou garantia antiban. Latência real de zero segundos não é possível. O ciclo mantém aproximadamente 1 ms de espera entre leituras para não ocupar continuamente a CPU; esse intervalo não mede a latência completa da reação.
 
 ## Compilar
 
@@ -36,13 +38,3 @@ cmake -S . -B build -A x64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
-
-## Correções 1.4.0
-
-A espera por feedback da câmera na 1.3.0 podia permanecer ativa sem limite. Agora há uma única tentativa menor de recuperação após 40 ms sem mudança observável; persistindo a ausência de resposta, o painel pede diagnóstico, sem repetir movimentos às cegas. Uma entrada recusada pelo Windows libera a próxima tentativa do controlador. Isso corrige caminhos do código, mas não comprova a causa da falha observada pelo usuário em partida.
-
-Calibração concluída é salva automaticamente; a opção escolhida para alvos sem equipe também é preservada. Rage continua desligado ao iniciar. O painel exibe o último estado da mira no mesmo processo mesmo após voltar à interface e distingue calibração ausente, permissão, leitura e retorno da câmera.
-
-Interface com estado do controle em destaque e abas Rage, Conexão e Calibração. Carregamento com lista de etapas reais, transição visual mais curta (mínimo de 360 ms), tratamento de falha e botão Tentar novamente. Um teste Windows simula falha de recurso, captura a tela de erro e aciona a recuperação, antes de verificar as telas nas sete resoluções.
-
-Se continuar sem atuar, exporte um novo diagnostico-SANGUE.txt depois da tentativa no campo de treino. O relatório da versão atual é necessário para distinguir ausência de entidades, bloqueio de calibração/FOV, entrada recusada e câmera sem feedback.

@@ -7,38 +7,33 @@ inline float degrees(float angle){return std::remainder(angle,360.f);}
 inline bool validSensitivity(float value){return std::isfinite(value)&&std::abs(value)>=.0001f&&std::abs(value)<=2.f;}
 struct MouseStep{int x{},y{};uint64_t target{};};
 class Stabilizer{
-    uint64_t locked{};bool observed{},recoveryUsed{};Clock::time_point lastSent{};std::string state;float lastErrorX{},lastErrorY{};std::array<float,9> lastAxes{};float carryX{},carryY{};bool centered{};int lastBone{-1};float lastX{},lastY{};
+    uint64_t locked{};Clock::time_point lastSample{},lastUpdate{};std::string state;
+    float carryX{},carryY{};bool centered{};int lastBone{-1};float lastX{},lastY{};
 public:
-    void reset(){locked=0;observed=false;recoveryUsed=false;lastSent={};state.clear();carryX=carryY=0;centered=false;lastBone=-1;}
-    void rejected(){observed=false;recoveryUsed=false;carryX=carryY=0;state="Entrada recusada pelo Windows; nova tentativa permitida";}
+    void reset(){locked=0;lastSample={};lastUpdate={};state.clear();carryX=carryY=0;centered=false;lastBone=-1;}
+    void rejected(){lastSample={};lastUpdate={};carryX=carryY=0;state="Entrada recusada pelo Windows; nova tentativa permitida";}
     const std::string& status()const{return state;}
     MouseStep update(const Frame& f,const Settings& s,Clock::time_point now){
         if(!s.rage||!s.unknownTargets||!f.focused||!s.calibrated||!validSensitivity(s.degreesX)||!validSensitivity(s.degreesY)||!fresh(f,now)||!f.view.valid()){reset();return {};}
         if(lastBone!=s.bone||lastX!=s.degreesX||lastY!=s.degreesY){reset();lastBone=s.bone;lastX=s.degreesX;lastY=s.degreesY;}
+        if(lastSample==f.stamp){state="Acompanhamento ativo / aguardando amostra nova";return {0,0,locked};}lastSample=f.stamp;
         const float focal=f.view.height/(2*std::tan(f.view.fov*.00872664626f));
         const float radius=s.radius*f.view.height/1080.f;float best=radius*radius;std::optional<V2> point;uint64_t next=0;
         for(const auto& pose:f.poses)if(s.bone>=0&&s.bone<Count&&pose.points[s.bone]){auto p=f.view.project(*pose.points[s.bone]);if(!p)continue;float x=p->x-f.view.width*.5f,y=p->y-f.view.height*.5f,d=x*x+y*y;
             if(pose.id==locked&&d<=radius*radius){point=p;next=pose.id;break;}if(d<best){best=d;point=p;next=pose.id;}}
-        if(!point){reset();return {};}
-        if(locked!=next){locked=next;carryX=carryY=0;centered=false;observed=false;recoveryUsed=false;}
-        MouseStep result{0,0,locked};state="Alvo próximo do centro";
+        if(!point){reset();state="Aguardando alvo dentro do FOV";return {};}
+        if(locked!=next){locked=next;carryX=carryY=0;centered=false;lastUpdate={};}
+        MouseStep result{0,0,locked};
         const float x=std::atan((point->x-f.view.width*.5f)/focal)*57.2957795f,y=-std::atan((point->y-f.view.height*.5f)/focal)*57.2957795f;
         const float zoneX=std::max(.025f,std::abs(s.degreesX)*.55f),zoneY=std::max(.025f,std::abs(s.degreesY)*.55f);
-        if(std::abs(x)<=zoneX*(centered?1.8f:1.f)&&std::abs(y)<=zoneY*(centered?1.8f:1.f)){centered=true;carryX=carryY=0;return result;}centered=false;
-        bool retry=false;
-        if(observed){float change=0;for(size_t i=0;i<9;++i)change+=std::abs(f.view.axes[i]-lastAxes[i]);
-            const bool unchanged=change<.00001f&&std::abs(x-lastErrorX)<.02f&&std::abs(y-lastErrorY)<.02f;
-            if(unchanged){
-                if(recoveryUsed){state="Sem resposta da câmera: exporte o diagnóstico";return result;}
-                if(now-lastSent<std::chrono::milliseconds(40)){state="Aguardando resposta da câmera";return result;}
-                retry=true;recoveryUsed=true;state="Tentativa limitada de recuperação";
-            }else recoveryUsed=false;
-        }
-        const float fraction=retry?.2f:.7f;
+        if(std::abs(x)<=zoneX*(centered?1.8f:1.f)&&std::abs(y)<=zoneY*(centered?1.8f:1.f)){centered=true;carryX=carryY=0;lastUpdate=now;state="Acompanhando alvo / centro alinhado";return result;}
+        const bool acquire=lastUpdate==Clock::time_point{}||centered;centered=false;
+        const float dt=lastUpdate==Clock::time_point{}?.008f:std::clamp(std::chrono::duration<float>(now-lastUpdate).count(),.0001f,.025f);lastUpdate=now;
+        const float fraction=acquire?.7f:1-std::exp(-18.f*dt),maximum=acquire?3.f:180.f*dt;
         auto axis=[&](float angle,float gain,float zone,float& carry){if(std::abs(angle)<=zone){carry=0;return 0;}float error=angle/gain;if(carry*error<0)carry=0;
-            float requested=std::clamp(angle*fraction,-3.f,3.f)/gain+carry;int step=int(std::round(requested));const int limit=int(std::floor(std::abs(error)));step=std::clamp(step,-limit,limit);carry=requested-step;return std::clamp(step,-2000,2000);};
+            float requested=std::clamp(angle*fraction,-maximum,maximum)/gain+carry;int step=int(std::round(requested));const int limit=int(std::floor(std::abs(error)));step=std::clamp(step,-limit,limit);step=std::clamp(step,-2000,2000);carry=requested-step;return step;};
         result.x=axis(x,s.degreesX,zoneX,carryX);result.y=axis(y,s.degreesY,zoneY,carryY);
-        if(result.x||result.y){observed=true;lastSent=now;lastAxes=f.view.axes;lastErrorX=x;lastErrorY=y;state=retry?"Tentativa limitada de recuperação":"Correção calculada";}return result;
+        state="Acompanhamento contínuo ativo";return result;
     }
 };
 struct CalibrationTick{MouseStep move;bool save{},busy{};float x{},y{},fov{};std::string message;};
