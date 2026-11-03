@@ -30,8 +30,8 @@ struct View {
 };
 enum Bone{Head,Neck,Chest,Spine,Pelvis,UpperL,LowerL,HandL,UpperR,LowerR,HandR,ThighL,CalfL,FootL,ThighR,CalfR,FootR,Count};
 struct Pose{uint64_t id{};std::array<std::optional<V3>,Count> points;};
-struct Frame{View view;std::vector<Pose> poses;Clock::time_point stamp{};uint64_t serial{},moduleBase{},targetId{};uint32_t pid{};int x{},y{};bool focused{},budgetExpired{};unsigned nodes{},rejected{},readErrors{},namedBones{},ambiguousBones{};float readMs{};std::string status="Aguardando jogo",error,hash,aimState="Rage desligado",sampledNames,calibrationState="Sensibilidade não calibrada";};
-struct Settings{bool rage{},unknownTargets{},calibrated{};float radius{180},degreesX{.1f},degreesY{-.1f},calibrationFov{90};int bone{Head},key{2};};
+struct Frame{View view;std::vector<Pose> poses;Clock::time_point stamp{};uint64_t serial{},moduleBase{},targetId{};uint32_t pid{};int x{},y{};bool focused{},budgetExpired{};unsigned nodes{},rejected{},readErrors{},namedBones{},ambiguousBones{};float readMs{};std::string status="Aguardando jogo",error,hash,aimState="Rage desligado",sampledNames;};
+struct Settings{bool rage{},unknownTargets{},invertX{},invertY{};float radius{180},strength{1.f};int bone{Head},key{2};};
 inline bool fresh(const Frame& f,Clock::time_point now){auto age=now-f.stamp;return f.stamp!=Clock::time_point{}&&age>=Clock::duration::zero()&&age<std::chrono::milliseconds(25);}
 inline std::vector<Pose> unique(std::vector<Pose> p){std::unordered_set<uint64_t> ids;p.erase(std::remove_if(p.begin(),p.end(),[&](const Pose& v){return !v.id||!ids.insert(v.id).second;}),p.end());return p;}
 inline std::optional<V2> target(const Frame& f,const Settings& s){
@@ -46,8 +46,8 @@ inline std::string aimState(const Frame& f,const Settings& s,bool held,Clock::ti
     if(!f.focused)return "Aguardando foco no jogo";
     if(!fresh(f,now))return "Amostra ausente ou expirada";
     if(!s.unknownTargets)return "Bloqueado: alvos sem equipe não autorizados";
-    if(!s.calibrated)return "Calibre a sensibilidade na aba Ajustes";
-    if(std::abs(f.view.fov-s.calibrationFov)>2.f)return "Zoom diferente da calibração; recalibre";
+    if(!f.view.valid())return "Câmera incompatível";
+    if(!std::isfinite(s.strength)||s.strength<.25f||s.strength>2.f)return "Força de correção inválida";
     if(!held)return "Segure a tecla de ativação configurada";
     if(!target(f,s))return "Nenhum osso selecionado dentro do FOV";
     return "Pronto para entrada";

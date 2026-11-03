@@ -14,11 +14,11 @@ int main(){
     View moved=v;moved.anchor={1000000000,-1000000000,0};View next=moved;next.anchor[0]-=100;
     require(std::abs(rebase({1,2,3},moved,next).x-101)<.001f,"camera origin rebasing preserves position");
     s.bone=Count;require(!target(f,s),"invalid bone rejected");
-    s.bone=Head;s.rage=true;s.calibrated=true;f.focused=true;
+    s.bone=Head;s.rage=true;f.focused=true;
     require(aimState(f,s,true,f.stamp)=="Pronto para entrada","module and held key suffice without arm latch");
     require(aimState(f,s,false,f.stamp)=="Segure a tecla de ativação configurada","key release pauses movement");
     f.focused=false;require(aimState(f,s,true,f.stamp)=="Aguardando foco no jogo","focus loss pauses movement");f.focused=true;
     require(aimState(f,s,true,f.stamp+std::chrono::milliseconds(25))=="Amostra ausente ou expirada","stale frame cannot move mouse");
     s.unknownTargets=false;require(aimState(f,s,true,f.stamp)=="Bloqueado: alvos sem equipe não autorizados","unknown target rejection explained");
-    s.unknownTargets=true;Settings zoom=s;zoom.calibrationFov=60;require(aimState(f,zoom,true,f.stamp)=="Zoom diferente da calibração; recalibre","changed zoom requires calibration");s.rage=false;require(aimState(f,s,true,f.stamp)=="Rage desligado","module off pauses movement");std::cout<<checks<<" checks passed\n";
+    s.unknownTargets=true;f.view.fov=40;require(aimState(f,s,true,f.stamp)=="Pronto para entrada","zoom does not require calibration");Settings invalid=s;invalid.strength=0;require(aimState(f,invalid,true,f.stamp)=="Força de correção inválida","invalid strength rejected");s.rage=false;require(aimState(f,s,true,f.stamp)=="Rage desligado","module off pauses movement");std::cout<<checks<<" checks passed\n";
 }
